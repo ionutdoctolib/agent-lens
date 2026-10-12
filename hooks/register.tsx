@@ -65,11 +65,14 @@ const C = {
   graph: 'cyan',
 } as const
 
-// Opus in the terminal's default color (bold), no pink.
-const TIER_COLOR: Record<Tier, string | undefined> = { opus: undefined, sonnet: 'blue', haiku: 'green' }
+// One color per model: opus magenta, sonnet blue, haiku green.
+const TIER_COLOR: Record<Tier, string | undefined> = { opus: 'magenta', sonnet: 'blue', haiku: 'green' }
 const modelColor = (model: string) => TIER_COLOR[tierOf(model) ?? 'opus']
 
 const short = (model: string) => model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+
+// Pill with the tier's initial (H/S/O) in the tier's color, so the model of each step reads at a glance.
+const pill = (model: string) => (tierOf(model) ?? short(model)).slice(0, 1).toUpperCase()
 
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n))
 
@@ -1000,7 +1003,8 @@ export const register: Register = on => {
             <Text>
               {' '}
               {s.agentId && <Text color={C.run}>{workerType(s.agentId)} </Text>}
-              <Text bold color={modelColor(s.model)}>{short(s.model)}</Text>
+              <Text bold inverse color={modelColor(s.model)}> {pill(s.model)} </Text>
+              <Text bold color={modelColor(s.model)}> {short(s.model)}</Text>
               {s.effort && <Text color={C.info}> {s.effort}</Text>}
               <Text dimColor> #{s.index} </Text>
             </Text>

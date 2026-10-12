@@ -6,8 +6,17 @@ import { backlinks, isolated } from './memories'
 
 export const INDEX = 'MEMORY.md'
 const TYPE_COLOR: Record<string, string> = { project: 'cyan', feedback: 'yellow', reference: 'blue', user: 'magenta' }
+// What each memory type is for, and why it matters to the model. The four types are the memory system's own taxonomy.
+const TYPE_HELP: Record<string, string> = {
+  user: 'user: who you are, your role and preferences. Shapes every answer.',
+  feedback: 'feedback: how to work with you, corrections and confirmed approaches, with the why. Applied to every similar task.',
+  project: 'project: ongoing work, goals and deadlines not visible in the code. Goes stale, so check its dates.',
+  reference: 'reference: pointers to external systems (dashboards, tickets, docs). Tells the model where to look.',
+}
+const UNTYPED = 'untyped: no type in the frontmatter, so the model cannot tell when it applies.'
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 const tail = (path: string) => path.split('/').slice(-2).join('/')
+const clip = (text: string, n = 70) => (text.length > n ? `${text.slice(0, n - 1)}…` : text)
 
 export type MemoryData = { list: Memory[]; meta: MemoryMeta; use: Record<string, MemoryUse>; opened: MemoryView | null; filter: string; room: number }
 export type MemoryActions = { open: (name: string) => void; back: () => void; filter: (type: string) => void; refresh: () => void }
@@ -53,6 +62,7 @@ export const memoriesView = ({ Box, Text, Button, Markdown }: Ui, { list, meta, 
           <Button key="mem-back" plain label="← graf" hotkey="b" onPress={act.back} />
         </Box>
         <Text dimColor wrap="wrap">{node.type} · {k(node.size)} B · {node.description}</Text>
+        <Text dimColor wrap="wrap">{TYPE_HELP[node.type] ?? UNTYPED}</Text>
         <Text wrap="wrap">
           <Text dimColor>in prompt (MEMORY.md): </Text>
           {node.indexed ? <Text>„{node.hook}”</Text> : <Text color="red">missing from the index: the model sees it only if it looks for it</Text>}
@@ -81,7 +91,7 @@ export const memoriesView = ({ Box, Text, Button, Markdown }: Ui, { list, meta, 
     .map(m => ({ m, inN: back[m.name]?.length ?? 0, outN: m.links.length }))
     .sort((a, b) => b.inN + b.outN - (a.inN + a.outN) || a.m.name.localeCompare(b.m.name))
   const maxDeg = Math.max(1, ...shown.map(s => s.inN + s.outN))
-  const rows = Math.max(5, room - 14)
+  const rows = Math.max(6, room - 10)
   const idx = use[INDEX]
   const reads = Object.entries(use).filter(([n, u]) => n !== INDEX && u.read).length
   const writes = Object.values(use).reduce((n, u) => n + u.write, 0)
@@ -98,34 +108,24 @@ export const memoriesView = ({ Box, Text, Button, Markdown }: Ui, { list, meta, 
         <Text dimColor> links · {lonely.length} isolated</Text>
         {missing > 0 && <Text color="red"> · {missing} outside the index</Text>}
       </Text>
+      <Text wrap="wrap" dimColor>user = who you are · feedback = how to work with you · project = ongoing work · reference = where to look</Text>
 
-      <Box flexDirection="column" marginTop={1}>
-        <Text bold dimColor>HOW THEY REACH THE MODEL</Text>
+      <Box marginTop={1} flexDirection="column">
         {meta.context.map(f => (
           <Text key={`ctx-${f.path}`} wrap="truncate-end">
-            <Text color="green">1 prompt </Text>
+            <Text color="green">in prompt </Text>
             <Text>{tail(f.path)}</Text>
             <Text dimColor> {f.type} · {k(f.tokens)} tok, on every request</Text>
           </Text>
         ))}
-        {meta.context.length === 0 && <Text dimColor>1 prompt  nothing from memory in context</Text>}
+        {meta.context.length === 0 && <Text dimColor>in prompt  nothing from memory in context</Text>}
         <Text wrap="truncate-end">
-          <Text color="cyan">2 read    </Text>
-          <Text dimColor>whole file, via Read/Bash when the index looks relevant: </Text>
-          <Text bold>{reads}</Text>
-          {idx?.read ? <Text dimColor> (+ MEMORY.md ×{idx.read})</Text> : null}
+          <Text color="cyan">◉ read {reads}</Text>
+          <Text color="blue">  ↺ recalled {recalled}</Text>
+          <Text color="yellow">  ✎ written {writes}</Text>
+          {idx?.read ? <Text dimColor>  (MEMORY.md read ×{idx.read})</Text> : null}
         </Text>
-        <Text wrap="truncate-end">
-          <Text color="blue">3 recall   </Text>
-          <Text dimColor>attached by the engine: </Text>
-          <Text bold>{recalled}</Text>
-          <Text dimColor> ({meta.recalls.length} attachments)</Text>
-        </Text>
-        <Text wrap="truncate-end">
-          <Text color="yellow">4 write    </Text>
-          <Text dimColor>Write/Edit in memory/: </Text>
-          <Text bold>{writes}</Text>
-        </Text>
+        <Text dimColor wrap="wrap">◉ opened as a file · ↺ attached by the engine · ✎ edited in memory/ · ←cited by →links to</Text>
         {meta.remember.length > 0 && (
           <Text wrap="wrap" dimColor>
             <Text color="magenta">+ .remember </Text>
@@ -140,16 +140,19 @@ export const memoriesView = ({ Box, Text, Button, Markdown }: Ui, { list, meta, 
         ))}
         <Button key="mem-refresh" plain label="↻" onPress={act.refresh} />
       </Box>
-      <Text dimColor>graph: ←cited by →links to · ◉read ✎written ↺recalled</Text>
+      {filter !== 'all' && <Text wrap="wrap" dimColor>{TYPE_HELP[filter] ?? UNTYPED}</Text>}
       {shown.slice(0, rows).map(({ m, inN, outN }) => {
         const cells = Math.max(inN + outN ? 1 : 0, Math.round(((inN + outN) / maxDeg) * 6))
+        const text = m.description || m.hook
 
         return (
           <Box key={`mem-${m.name}`}>
             <Text color={TYPE_COLOR[m.type]}>{'▮'.repeat(cells).padEnd(6, '·')} </Text>
             <Button key={`mo-${m.name}`} plain label={m.name} onPress={open(m.name)} />
-            <Text dimColor wrap="truncate-end">
-              {' '}←{inN} →{outN}
+            {text ? <Text dimColor>  </Text> : null}
+            {text ? <Button key={`md-${m.name}`} plain label={clip(text)} onPress={open(m.name)} /> : null}
+            <Text dimColor>
+              {`  ←${inN} →${outN}`}
             </Text>
             <Text color="green">{marks(m.name)}</Text>
             {!m.indexed && <Text color="red"> !idx</Text>}

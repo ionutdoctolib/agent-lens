@@ -66,7 +66,8 @@ test('Memories tab: the graph, the index in context and memory neighbors', async
 
   const ui = await $.ui.mount({ plugin: 'agent-lens', surface: 'terminal', ...PANE })
   await ui.press({ key: 'tab-memories' })
-  expect(await ui.find({ type: 'Text', text: /HOW THEY REACH THE MODEL/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /in prompt/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: /prima/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /AutoMem · 1\.2k tok/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /outside the index/ })).toBeDefined()
   await ui.press({ key: 'mo-a' })
