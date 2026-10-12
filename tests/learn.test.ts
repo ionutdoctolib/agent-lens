@@ -18,6 +18,8 @@ test('the ESCALATE line is read, including the legacy Romanian marker with or wi
   expect(escalationOf('ESCALADEAZĂ: trebuie ales între două scheme')).toBe('trebuie ales între două scheme')
   expect(escalationOf('gata\nescaladeaza: ambiguu')).toBe('ambiguu')
   expect(escalationOf('ESCALATE:')).toBeUndefined()
+  expect(escalationOf('It accepts both `ESCALATE:` and the legacy marker. VERDICT: OK')).toBeUndefined()
+  expect(escalationOf('  ESCALATE: which module owns the cache?')).toBe('which module owns the cache?')
   expect(escalationOf('all ok')).toBeUndefined()
 })
 

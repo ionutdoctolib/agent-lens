@@ -64,7 +64,8 @@ The last line is exactly one of: "VERDICT: OK" or "VERDICT: FAIL — <main reaso
 // A cheap subagent that is unsure stops instead of guessing; the mod sees the line and flags it.
 export const ESCALATE = 'ESCALATE:'
 export const ESCALATE_RULE = `\n\n[Agent Lens] You are running on a cheap model. If the task requires a design decision, touches more modules than you were given, or is ambiguous, do not guess and do not deliver half a job: stop and reply only with the line "${ESCALATE} <what is missing or what must be decided>".`
-export const escalationOf = (answer: string) => answer.match(/(?:ESCALATE|ESCALADEAZ[AĂ]):[ \t]*([^\n]*)/i)?.[1]?.trim() || undefined
+// Only a line that starts with the marker counts: a report that quotes it mid-sentence is not an escalation.
+export const escalationOf = (answer: string) => answer.match(/^[ \t]*(?:ESCALATE|ESCALADEAZ[AĂ]):[ \t]*(.*)$/im)?.[1]?.trim() || undefined
 
 // USD per million tokens (claude-api skill, 2026-10-06); cache writes at 1h TTL, as Claude Code runs.
 // Haiku costs 5x above 100K prompt tokens.
