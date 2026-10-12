@@ -14,6 +14,18 @@ const label = (tool: string) => tool.replace(/^mcp__(?:plugin_)?([^_]+(?:_[^_]+)
 
 export type Kind = 'read' | 'edit' | 'other'
 
+const PLAN_MIN_CALLS = 3
+
+// One call's kind, the same rules as a whole step's.
+const callKind = (tool: string, brief: string): Kind | null => {
+  const name = label(tool)
+  if (NEUTRAL.test(name)) return null
+  if (READ.test(name) || (name === 'Bash' && READ_BASH.test(brief))) return 'read'
+
+  return EDIT.test(name) ? 'edit' : 'other'
+}
+const callsOf = (list: Step[], kind: Kind) => list.flatMap(s => s.uses ?? []).filter(u => callKind(u.tool, u.brief) === kind).length
+
 // A step is "read-only" or "edit-only" only if all its tools (apart from neutral ones) are.
 export const kindOf = (s: Step): Kind => {
   const uses = (s.uses ?? []).map(u => ({ name: label(u.tool), brief: u.brief })).filter(u => !NEUTRAL.test(u.name))
@@ -85,10 +97,14 @@ export const retroOf = (turnId: string, at: number, main: Step[], workers: Worke
   }
 
   // The plan promised delegation, the execution did not deliver.
+  // Only when opus then did at least 3 calls of that kind itself (reads for haiku, edits for sonnet):
+  // a planned 1-2 call lookup is cheaper done in place than delegated.
   for (const t of ['haiku', 'sonnet'] as const) {
     const planned = plan?.steps.filter(s => s.tier === t && s.status !== 'skip') ?? []
-    if (planned.length && !workers.some(w => tierOf(w.model) === t)) {
-      findings.push({ kind: 'plan', text: `the plan put ${planned.length} steps on ${t} (${planned.map(s => s.title).join(', ')}), but no ${t} subagent was started`, saving: 0 })
+    const kind: Kind = t === 'haiku' ? 'read' : 'edit'
+    const done = callsOf(main.filter(s => s.isDone && tierOf(s.model) === 'opus'), kind)
+    if (planned.length && done >= PLAN_MIN_CALLS && !workers.some(w => tierOf(w.model) === t)) {
+      findings.push({ kind: 'plan', text: `the plan put ${planned.length} steps on ${t} (${planned.map(s => s.title).join(', ')}), but no ${t} subagent was started and opus did ${done} ${kind} calls itself`, saving: 0 })
     }
   }
 

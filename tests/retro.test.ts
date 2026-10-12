@@ -18,7 +18,7 @@ test('step kind: read, edit, other; Bash only with read commands', () => {
 })
 
 test('retrospective: 3 reads in a row on opus, opus read-only worker, escalation, plan not followed', () => {
-  const main = [step(1, [['Read', 'a']]), step(2, [['Grep', 'b']]), step(3, [['Read', 'c']]), step(4, [['Edit', 'a']]), step(5, [])]
+  const main = [step(1, [['Read', 'a']]), step(2, [['Grep', 'b']]), step(3, [['Read', 'c']]), step(4, [['Edit', 'a'], ['Edit', 'b'], ['Write', 'c']]), step(5, [])]
   const w = [worker, { ...worker, id: 'w2', agentId: 'a2', model: 'claude-haiku-5-5', escalated: 'ambiguous' }]
   const ws = [step(1, [['Read', 'x']], 'claude-opus-5-5', 'a1'), step(1, [['Read', 'y']], 'claude-haiku-5-5', 'a2')]
   const plan = { goal: '', approach: '', clarity: 5, assumptions: [], questions: [], betterPrompt: '', savings: [], revision: 0, at: 0, steps: [{ id: 's', title: 'edit', tier: 'sonnet' as const, after: [], status: 'done' as const }] }
@@ -39,4 +39,10 @@ test('message to the model: only with findings, with the tag and the lesson', ()
   const r = retroOf('t', 0, [step(1, [['Read', 'a']]), step(2, [['Read', 'b']]), step(3, [['Grep', 'c']])], [], [], null)
   expect(retroMessage(r)).toMatch(/^\[Agent Lens · turn retrospective\]\n.*\n- steps #1–#3/)
   expect(retroMessage({ ...r, findings: [] })).toBe('')
+})
+
+test('plan not followed: only from 3 calls of that kind done by opus itself', () => {
+  const plan = { goal: '', approach: '', clarity: 5, assumptions: [], questions: [], betterPrompt: '', savings: [], revision: 0, at: 0, steps: [{ id: 's', title: 'look up', tier: 'haiku' as const, after: [], status: 'done' as const }] }
+  expect(retroOf('t', 0, [step(1, [['Read', 'a'], ['Bash', 'grep -n x a.ts']]), step(2, [])], [], [], plan).findings).toEqual([])
+  expect(retroOf('t', 0, [step(1, [['Read', 'a'], ['Grep', 'x']]), step(2, [['Read', 'b']])], [], [], plan).findings.map(f => f.kind)).toEqual(['plan'])
 })
