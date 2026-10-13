@@ -8,7 +8,7 @@ import { INDEX, memoriesView } from './memories-tab'
 import { workersView } from './workers-tab'
 import { retroMessage, retroOf } from './retro'
 import { namesIn, parseIndex, parseMemory, projectSlug } from './memories'
-import { ESCALATE, ESCALATE_RULE, MODEL_IDS, VALIDATOR, VALIDATOR_PROMPT, addMiss, classify, costOf, escalationOf, learned, pickSubagentModel, tagged, tierOf, verdictOf, wordsOf } from './router'
+import { ESCALATE, ESCALATE_RULE, MODEL_IDS, VALIDATOR, VALIDATOR_PROMPT, addMiss, costOf, escalationOf, learned, tagged, tierOf, verdictOf, wordsOf } from './router'
 import type { Tier } from './router'
 
 const PANE = 'agent-lens'
@@ -398,10 +398,6 @@ export const register: Register = on => {
   on('prompt.attachment', async ($, e, next) => {
     const res = await next(e)
     const text = (e as { text?: string }).text ?? ''
-    // A stop hook's feedback (quality gates, checks) is mechanical work: it doesn't inherit Opus.
-    if (e.origin?.kind === 'hook' && e.origin.event === 'Stop') {
-      await update($, turnTier, cur => (cur.why === 'picked by you' ? cur : { tier: 'sonnet', why: 'hook feedback' }))
-    }
     if (/memor/i.test(e.type) && text) {
       const names = namesIn(text, await read($, memories))
       await update($, memMeta, meta => ({ ...meta, recalls: [...meta.recalls, { type: e.type, names }].slice(-20) }))
@@ -447,10 +443,9 @@ export const register: Register = on => {
     void $.ui.open({ id: PANE, title: 'Agent Lens' })
     const tag = tagged(e.text)
     const now = await $.clock.now()
+    // Every new turn (yours, a notification, hook feedback) starts on Opus; only Opus delegates down.
+    await update($, turnTier, () => (tag.tier ? { tier: tag.tier, why: 'picked by you' } : { tier: 'opus', why: 'default' }))
     if (!e.origin || e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
-      const guess = classify(tag.text)
-      const known = await read($, misses)
-      await update($, turnTier, () => (tag.tier ? { tier: tag.tier, why: 'picked by you' } : (learned(tag.text, guess.tier, known) ?? guess)))
       await update($, graphSeen, () => false)
       await update($, planAsked, () => false)
       await update($, turnAt, () => now)
@@ -621,7 +616,8 @@ export const register: Register = on => {
     const isRoutable = !e.fork && !e.workflow && e.subagentType !== VALIDATOR && (await read($, routing))
     const task = `${e.description} ${e.prompt.slice(0, 200)}`
     const asked = clip(e.prompt, 1500)
-    const picked = isRoutable ? pickSubagentModel(e.subagentType, e.description, e.model) : undefined
+    // Opus picks the subagent's model; without one, the subagent inherits Opus.
+    const picked = isRoutable && e.model ? { model: e.model, why: 'requested' } : undefined
     // What already failed on this model goes up a tier, even if the main model asked for another.
     const route = picked && (learned(task, tierOf(picked.model) ?? 'opus', await read($, misses)) ?? picked)
     const routeTier = route && tierOf(route.model)

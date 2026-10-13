@@ -1,6 +1,6 @@
 import type { Miss } from '../types'
 
-// Model routing: Opus is the default; Sonnet only for mechanical work, Haiku only for short lookups.
+// Model routing: every turn runs on Opus; only Opus delegates down, through Agent's model parameter.
 export type Tier = 'opus' | 'sonnet' | 'haiku'
 
 export const MODEL_IDS: Record<Tier, string> = {
@@ -10,39 +10,14 @@ export const MODEL_IDS: Record<Tier, string> = {
 }
 export const VALIDATOR = 'agent-lens:validator'
 
-const LIGHT_TYPES = /^(Explore|claude-code-guide|statusline-setup)$/
-const HEAVY = /(?<![\p{L}\p{N}])(arhitect|design|refactor|migra|debug|bug|de ce|audit|planific|implementeaz|modul|securit|performan|analiz|review|investig|diagnos|crash|eroare|error|nu merge|nu func|why|security|performance|analy[sz]|investigat|does not work|doesn't work|not working|broken)/iu
-const LOOKUP = /(?<![\p{L}\p{N}])(unde(?![\p{L}\p{N}])|where(?![\p{L}\p{N}])|which (is|are)(?![\p{L}\p{N}])|what (does|is)(?![\p{L}\p{N}])|show me|how many|how much|care (e|este|sunt)(?![\p{L}\p{N}])|ce (face|este|e|inseamn|înseamn)|arat[aă]-mi (unde|care|ce)|list(eaz[aă]|[aă]m)?(?![\p{L}\p{N}])|caut|g[aă]se[sș]te|find|search|locat|grep|explor|inventar|cum (se )?(activ|dezactiv|ascund|ar[aă]t|scot|pun|rulez|pornesc)|m?ascund|ar[aă]t(?![\p{L}\p{N}])|c[aâ]te(?![\p{L}\p{N}])|c[aâ]t(?![\p{L}\p{N}]))/iu
-const ACTION = /(?<![\p{L}\p{N}])(repar|fix|adaug|f[aă](?![\p{L}\p{N}])|schimb|modific|implement|creeaz|crea[zs]|scrie|m[uă]t[aă](?![\p{L}\p{N}])|actualiz|update|add(?![\p{L}\p{N}])|change|make(?![\p{L}\p{N}])|create)/iu
-const MECHANICAL = /(?<![\p{L}\p{N}])(redenume|rename|typo|traduc|commit|formatea|rubocop|lint|[sș]terge|scoate|adaug[aă] (un |o )?(c[aâ]mp|coloan|traducer|test|spec|buton|link)|culoar|colou?r|translat|delete|remove|format(?![\p{L}\p{N}])|roz|bar[aă](?![\p{L}\p{N}])|bordur|etichet|aliniaz)/iu
-
-// Quoted or pasted text (errors, UI snippets, logs) says nothing about how hard the request is.
+// Quoted or pasted text (errors, UI snippets, logs) says nothing about the task's words.
 const QUOTED = /<pasted_content[^>]*>[\s\S]*?<\/pasted_content[^>]*>|```[\s\S]*?```|„[^”]*”|"[^"\n]*"|`[^`\n]*`|«[^»]*»/g
-
-// ponytail: keyword and length heuristic; a model.complete classifier if it is wrong often
-export const classify = (text: string): { tier: Tier; why: string } => {
-  const t = text.replace(QUOTED, ' ').trim()
-  if (HEAVY.test(t) || t.length > 600) return { tier: 'opus', why: 'complex' }
-  if (MECHANICAL.test(t) && t.length <= 400) return { tier: 'sonnet', why: 'mechanical work' }
-  if (ACTION.test(t)) return { tier: 'opus', why: 'change' }
-  if (LOOKUP.test(t) && t.length <= 200) return { tier: 'haiku', why: 'short lookup' }
-
-  return { tier: 'opus', why: 'default' }
-}
 
 // "[haiku] where is X" pins the turn's model; the tag does not reach the model.
 export const tagged = (text: string): { tier?: Tier; text: string } => {
   const m = text.match(/^\s*\[(opus|sonnet|haiku)\]\s*/i)
 
   return m ? { tier: m[1].toLowerCase() as Tier, text: text.slice(m[0].length) } : { text }
-}
-
-export const pickSubagentModel = (type: string, description: string, asked?: string) => {
-  if (asked) return { model: asked, why: 'requested' }
-  if (LIGHT_TYPES.test(type)) return { model: 'haiku', why: 'search type' }
-  const { tier, why } = classify(description)
-
-  return { model: tier, why }
 }
 
 export const tierOf = (model: string): Tier | undefined => /opus|sonnet|haiku/i.exec(model)?.[0].toLowerCase() as Tier | undefined
