@@ -1,0 +1,11 @@
+{
+  "name": "agent-lens",
+  "owner": { "name": "Ionut Mladin" },
+  "plugins": [
+    {
+      "name": "agent-lens",
+      "source": "./",
+      "description": "Claude Code sidebar: plan and execution flow per model, subagent workers, git, memories, and a delegation retrospective after every turn."
+    }
+  ]
+}

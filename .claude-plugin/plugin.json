@@ -2,5 +2,7 @@
   "name": "agent-lens",
   "version": "0.1.1",
   "description": "Claude Code sidebar: plan and execution flow per model, subagent workers, git, memories, and a delegation retrospective after every turn.",
+  "author": { "name": "Ionut Mladin" },
+  "repository": "https://github.com/ionutm87/agent-lens",
   "types": "./types/index.d.ts"
 }
