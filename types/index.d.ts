@@ -50,7 +50,7 @@ export type Validation = {
   tier?: 'opus' | 'sonnet' | 'haiku'
 }
 
-export type Tab = 'think' | 'changes' | 'workers' | 'memories'
+export type Tab = 'think' | 'changes' | 'workers' | 'memories' | 'styles'
 
 export type Change = { path: string; code: string; staged: boolean; unstaged: boolean; add: number; del: number }
 
@@ -103,6 +103,10 @@ export type MemoryMeta = {
 
 export type MemoryView = { name: string; body: string }
 
+// Output styles: Markdown files in <config>/output-styles/. The draft is the one being edited, line by line.
+export type Style = { file: string; name: string; description: string; keep: boolean; body: string }
+export type StyleDraft = { file: string; description: string; lines: string[]; dirty: boolean }
+
 // Turn retrospective: where cheaper delegation was possible. saving = USD estimate; wasted = cost lost on an escalation.
 export type RetroFinding = { kind: 'read' | 'edit' | 'worker' | 'escalated' | 'plan'; text: string; saving: number; wasted?: number }
 export type Retro = { turnId: string; at: number; steps: number; cost: number; cheapShare: number; saving: number; findings: RetroFinding[] }
@@ -142,6 +146,12 @@ declare module 'claude-code' {
       memUse: Record<string, MemoryUse>
       memView: MemoryView | null
       memType: string
+      styles: Style[]
+      styleActive: string
+      styleDraft: StyleDraft | null
+      styleFresh: string
+      styleNote: string
+      styleLoaded: boolean
       misses: Miss[]
       planFirst: boolean
       planAsked: boolean

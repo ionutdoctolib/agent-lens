@@ -1,11 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { Engine, HookFor, Register, RenderChildren } from 'claude-code'
 
-import type { Answer, Change, Diff, GitNote, Memory, MemoryMeta, MemoryUse, MemoryView, Miss, Plan, PlanStep, Repo, Retro, Step, StepView, Tab, Totals, Validation, Worker } from '../types'
+import type { Answer, Change, Diff, GitNote, Memory, MemoryMeta, MemoryUse, MemoryView, Miss, Plan, PlanStep, Repo, Retro, Step, StepView, Style, StyleDraft, Tab, Totals, Validation, Worker } from '../types'
 import { branchLabel, cleanMessage, clip, outcomeOf, parseNumstat, parseStatus, syncSteps, withCounts } from './changes'
 import { PLAN_DESCRIPTION, PLAN_RULE, PLAN_SCHEMA, PLAN_TOOL, PLAN_TOOL_ID, answersMessage, layers, normalizePlan } from './plan'
 import { INDEX, memoriesView } from './memories-tab'
 import { workersView } from './workers-tab'
+import { stylesView } from './styles-tab'
+import { activeStyle, buildStyle, parseStyle, slugName, withOutputStyle } from './styles'
 import { retroMessage, retroOf } from './retro'
 import { namesIn, parseIndex, parseMemory, projectSlug } from './memories'
 import { ESCALATE, ESCALATE_RULE, MODEL_IDS, VALIDATOR, VALIDATOR_PROMPT, addMiss, costOf, escalationOf, learned, tagged, tierOf, verdictOf, wordsOf } from './router'
@@ -43,6 +45,12 @@ const memMeta = atom({ plugin: 'agent-lens', key: 'memMeta' } as const, { dir: '
 const memUse = atom({ plugin: 'agent-lens', key: 'memUse' } as const, {} as Record<string, MemoryUse>)
 const memView = atom({ plugin: 'agent-lens', key: 'memView' } as const, null as MemoryView | null)
 const memType = atom({ plugin: 'agent-lens', key: 'memType' } as const, 'all')
+const styles = atom({ plugin: 'agent-lens', key: 'styles' } as const, [] as Style[])
+const styleActive = atom({ plugin: 'agent-lens', key: 'styleActive' } as const, '')
+const styleDraft = atom({ plugin: 'agent-lens', key: 'styleDraft' } as const, null as StyleDraft | null)
+const styleFresh = atom({ plugin: 'agent-lens', key: 'styleFresh' } as const, '')
+const styleNote = atom({ plugin: 'agent-lens', key: 'styleNote' } as const, '')
+const styleLoaded = atom({ plugin: 'agent-lens', key: 'styleLoaded' } as const, false)
 const plan = atom({ plugin: 'agent-lens', key: 'plan' } as const, null as Plan | null)
 const answers = atom({ plugin: 'agent-lens', key: 'answers' } as const, {} as Record<string, Answer>)
 const busy = atom({ plugin: 'agent-lens', key: 'busy' } as const, false)
@@ -327,6 +335,82 @@ const memoryDir = async ($: Engine, context: MemoryMeta['context']) => {
   return `${base.stdout}/projects/${projectSlug(await $.session.root())}/memory`
 }
 
+// The "Style" tab: output styles are Markdown files in <config>/output-styles/; the active one is
+// "outputStyle" in <config>/settings.json. A change reaches the model at the next session start.
+const configDir = async ($: Engine) => (await $.process.run(['sh', '-c', 'printf %s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"'])).stdout
+
+const styleNotice = (ok: boolean, text: string) => (ok ? `✓ ${text}` : `✗ ${text}`)
+
+const loadStyles = async ($: Engine) => {
+  try {
+    const base = await configDir($)
+    const entries = (await $.fs.list(`${base}/output-styles`).catch(() => [])).filter(f => f.kind === 'file' && f.name.endsWith('.md'))
+    const list: Style[] = []
+    for (const f of entries) list.push(parseStyle(f.name, await $.fs.read(`${base}/output-styles/${f.name}`)))
+    const active = activeStyle(await $.fs.read(`${base}/settings.json`).catch(() => ''))
+    await update($, styles, () => list.sort((a, b) => a.name.localeCompare(b.name)))
+    await update($, styleActive, () => active)
+  } catch (err) {
+    await update($, styleNote, () => styleNotice(false, `could not read the styles: ${(err as Error).message}`))
+  }
+  await update($, styleLoaded, () => true)
+}
+
+const openStyle = async ($: Engine, file: string) => {
+  const s = (await read($, styles)).find(x => x.file === file)
+  if (!s) return
+  await update($, styleNote, () => '')
+  await update($, styleDraft, () => ({ file, description: s.description, lines: s.body.split('\n'), dirty: false }))
+}
+
+const editStyle = ($: Engine, fn: (d: StyleDraft) => StyleDraft) => void update($, styleDraft, d => (d ? { ...fn(d), dirty: true } : d))
+
+const saveStyle = async ($: Engine) => {
+  const d = await read($, styleDraft)
+  const s = d && (await read($, styles)).find(x => x.file === d.file)
+  if (!d || !s) return
+  try {
+    await $.fs.write(`${await configDir($)}/output-styles/${s.file}`, buildStyle({ ...s, description: d.description, body: d.lines.join('\n') }))
+    await loadStyles($)
+    await update($, styleDraft, cur => (cur ? { ...cur, dirty: false } : cur))
+    await update($, styleNote, () => styleNotice(true, 'saved'))
+  } catch (err) {
+    await update($, styleNote, () => styleNotice(false, `not saved: ${(err as Error).message}`))
+  }
+}
+
+const useStyle = async ($: Engine, file: string) => {
+  const s = (await read($, styles)).find(x => x.file === file)
+  if (!s) return
+  try {
+    const path = `${await configDir($)}/settings.json`
+    // Only a missing settings.json starts empty; a file that exists but cannot be read must not be overwritten.
+    await $.fs.write(path, withOutputStyle((await $.fs.exists(path)) ? await $.fs.read(path) : '', s.name))
+    await update($, styleActive, () => s.name)
+    await update($, styleNote, () => styleNotice(true, `${s.name} is the output style from the next session`))
+  } catch (err) {
+    await update($, styleNote, () => styleNotice(false, `settings.json not changed: ${(err as Error).message}`))
+  }
+}
+
+// A new style starts as a copy of the active one (or the first), so it is never an empty page.
+const createStyle = async ($: Engine, name: string) => {
+  const slug = slugName(name)
+  const list = await read($, styles)
+  if (!slug) return void (await update($, styleNote, () => styleNotice(false, 'give the style a name (letters or digits)')))
+  if (list.some(s => s.file === `${slug}.md`)) return void (await update($, styleNote, () => styleNotice(false, `${slug}.md already exists`)))
+  const active = await read($, styleActive)
+  const from = list.find(s => s.name === active) ?? list[0]
+  try {
+    await $.fs.write(`${await configDir($)}/output-styles/${slug}.md`, buildStyle({ file: `${slug}.md`, name: slug, description: from?.description ?? '', keep: from?.keep ?? true, body: from?.body ?? '' }))
+    await update($, styleFresh, () => '')
+    await loadStyles($)
+    await openStyle($, `${slug}.md`)
+  } catch (err) {
+    await update($, styleNote, () => styleNotice(false, `not created: ${(err as Error).message}`))
+  }
+}
+
 const loadMemories = async ($: Engine) => {
   try {
     const usage = await $.session.usage({ breakdown: 'summary', columns: 60 })
@@ -422,6 +506,7 @@ export const register: Register = on => {
     await $.tool.register({ name: PLAN_TOOL, description: PLAN_DESCRIPTION, inputSchema: PLAN_SCHEMA, isDeferred: false })
     void refreshChanges($)
     void loadMemories($)
+    void loadStyles($)
     const saved = await $.store.get(await missKey($))
     await update($, misses, () => (Array.isArray(saved) ? (saved as Miss[]) : []))
     await update($, hasGraph, () => false)
@@ -747,7 +832,7 @@ export const register: Register = on => {
     const lastPrompt = await read($, prompt)
     // A tab saved by an older version (Steps, Skills) falls back to Flow.
     const stored = String(await read($, tab))
-    const current: Tab = ['think', 'changes', 'workers', 'memories'].includes(stored) ? (stored as Tab) : 'think'
+    const current: Tab = ['think', 'changes', 'workers', 'memories', 'styles'].includes(stored) ? (stored as Tab) : 'think'
     const foldNow = await read($, folds)
     const retroNow = await read($, retro)
     const sessionModel = await $.session.model()
@@ -872,6 +957,7 @@ export const register: Register = on => {
             ['changes', `Git ${list.length}`, 'c'],
             ['workers', `Workers ${allWorkers.length}`, 'w'],
             ['memories', 'Memories', 'e'],
+            ['styles', 'Style', 'y'],
           ] as [Tab, string, string][]
         ).map(([id, label, hotkey]) => (
           <Button
@@ -883,6 +969,7 @@ export const register: Register = on => {
               void update($, tab, () => id)
               if (id === 'changes') void refreshChanges($)
               if (id === 'memories') void loadMemories($)
+              if (id === 'styles') void loadStyles($)
             }}
           />
         ))}
@@ -1385,7 +1472,23 @@ export const register: Register = on => {
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {header}
         {tabs}
-        {current === 'think' ? (stepDetail || thinkView) : current === 'changes' ? (diffView || changesView) : current === 'workers' ? workersNow : current === 'memories' ? memoriesView($.ui.resolve(e), { list: await read($, memories), meta: await read($, memMeta), use: await read($, memUse), opened: await read($, memView), filter: await read($, memType), room }, { open: name => void openMemory($, name), back: () => void update($, memView, () => null), filter: t => void update($, memType, () => t), refresh: () => void loadMemories($) }) : null}
+        {current === 'think' ? (stepDetail || thinkView) : current === 'changes' ? (diffView || changesView) : current === 'workers' ? workersNow : current === 'styles' ? stylesView(
+                  $.ui.resolve(e),
+                  { list: await read($, styles), active: await read($, styleActive), draft: await read($, styleDraft), fresh: await read($, styleFresh), note: await read($, styleNote), loaded: await read($, styleLoaded) },
+                  {
+                    open: file => void openStyle($, file),
+                    back: () => void update($, styleDraft, () => null),
+                    use: file => void useStyle($, file),
+                    desc: v => editStyle($, d => ({ ...d, description: v })),
+                    line: (i, v) => editStyle($, d => ({ ...d, lines: d.lines.map((l, j) => (j === i ? v : l)) })),
+                    add: i => editStyle($, d => ({ ...d, lines: [...d.lines.slice(0, i + 1), '', ...d.lines.slice(i + 1)] })),
+                    drop: i => editStyle($, d => ({ ...d, lines: d.lines.length > 1 ? d.lines.filter((_, j) => j !== i) : [''] })),
+                    save: () => void saveStyle($),
+                    fresh: v => void update($, styleFresh, () => v),
+                    create: name => void createStyle($, name),
+                    refresh: () => void loadStyles($),
+                  },
+                ) : current === 'memories' ? memoriesView($.ui.resolve(e), { list: await read($, memories), meta: await read($, memMeta), use: await read($, memUse), opened: await read($, memView), filter: await read($, memType), room }, { open: name => void openMemory($, name), back: () => void update($, memView, () => null), filter: t => void update($, memType, () => t), refresh: () => void loadMemories($) }) : null}
         <Box flexGrow={1} />
         {current === 'changes' && gitControls}
       </Box>
